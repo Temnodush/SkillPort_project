@@ -3,11 +3,13 @@ from rest_framework.permissions import IsAuthenticated
 from education.models import Course, Lesson
 from education.serializers import CourseSerializer, LessonSerializer
 from users.permissions import IsModerator, IsOwner
+from education.paginators import LessonPaginator, CoursePaginator
 
 
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
+    pagination_class = CoursePaginator
 
     def get_permissions(self):
         """Разграничение прав доступа по action"""
@@ -39,6 +41,7 @@ class CourseViewSet(viewsets.ModelViewSet):
 
 class LessonListCreateAPIView(generics.ListCreateAPIView):
     serializer_class = LessonSerializer
+    pagination_class = LessonPaginator
 
     def get_permissions(self):
         """Разграничение прав доступа: создавать могут только НЕ-модераторы"""
@@ -82,3 +85,8 @@ class LessonRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
         if user.groups.filter(name="Модераторы").exists():
             return Lesson.objects.all()
         return Lesson.objects.filter(owner=user)
+
+
+
+
+

@@ -1,6 +1,35 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from django.conf import settings
+from education.models import Course
 
+
+class Subscription(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="subscriptions",
+        verbose_name="пользователь",
+    )
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="subscriptions",
+        verbose_name="курс",
+    )
+
+    class Meta:
+        verbose_name = "подписка"
+        verbose_name_plural = "подписки"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("user", "course"),
+                name="unique_user_course_subscription",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user} -> {self.course}"
 
 class UserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
