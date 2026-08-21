@@ -7,6 +7,7 @@ from education.views import (
     LessonListCreateAPIView,
     LessonRetrieveUpdateDestroyAPIView,
 )
+from users.views import SubscriptionAPIView
 
 app_name = EducationConfig.name
 
@@ -14,6 +15,7 @@ router = DefaultRouter()
 router.register(r"courses", CourseViewSet, basename="courses")
 
 urlpatterns = [
+    path("courses/subscribe/", SubscriptionAPIView.as_view(), name="subscription"),
     path("", include(router.urls)),
     path("lessons/", LessonListCreateAPIView.as_view(), name="lessons-list-create"),
     path("lessons/<int:pk>/", LessonRetrieveUpdateDestroyAPIView.as_view(), name="lessons-detail"),
