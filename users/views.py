@@ -7,10 +7,53 @@ from rest_framework.views import APIView
 from education.models import Course
 from users.models import Payment, User, Subscription
 from users.permissions import IsOwner, IsModerator, IsSelfUser
-from users.serializers import PaymentSerializer, UserSerializer, UserRegistrationSerializer
+from users.serializers import PaymentSerializer, UserSerializer, UserRegistrationSerializer, PaymentCreateSerializer
 from django.shortcuts import get_object_or_404
+from users.services import create_stripe_product, create_stripe_price, create_stripe_session
+from django.utils import timezone
 
 
+
+class PaymentCreateAPIView(generics.CreateAPIView):
+    serializer_class = PaymentCreateSerializer
+    permission_classes = [IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        course_id = request.data.get('paid_course')
+        course = get_object_or_404(Course, id=course_id)
+
+        # Цена курса (берем из поля amount или, например, 1000 руб.)
+        # Для простоты возьмем из модели Course, если добавишь поле price, или фиксированно 1000
+        # Предположим, что в Course есть поле price (DecimalField). Если нет, добавь.
+        course_price = getattr(course, 'price', 1000)  # 1000 руб.
+        amount_in_cents = int(course_price * 100)
+
+        try:
+            product_id = create_stripe_product(course)
+            price_id = create_stripe_price(product_id, amount_in_cents)
+            success_url = request.build_absolute_uri('/api/payments/success/')
+            cancel_url = request.build_absolute_uri('/api/payments/cancel/')
+            session_id, payment_url = create_stripe_session(price_id, success_url, cancel_url)
+
+            payment = Payment.objects.create(
+                user=request.user,
+                paid_course=course,
+                amount=course_price,
+                payment_method=Payment.TRANSFER,
+                payment_date=timezone.now(),
+                stripe_product_id=product_id,
+                stripe_price_id=price_id,
+                stripe_session_id=session_id,
+                payment_url=payment_url,
+                status='pending',
+            )
+            return Response({
+                'payment_id': payment.id,
+                'payment_url': payment_url,
+                'stripe_session_id': session_id,
+            }, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class SubscriptionAPIView(APIView):
     permission_classes = (IsAuthenticated,)

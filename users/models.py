@@ -106,6 +106,11 @@ class Payment(models.Model):
         default=TRANSFER,
         verbose_name="способ оплаты",
     )
+    stripe_product_id = models.CharField(max_length=500, blank=True, null=True)
+    stripe_price_id = models.CharField(max_length=500, blank=True, null=True)
+    stripe_session_id = models.CharField(max_length=500, blank=True, null=True)
+    payment_url = models.URLField(max_length=1000, blank=True, null=True)
+    status = models.CharField(max_length=50, blank=True, null=True, default='pending')
 
     def __str__(self):
         return f"{self.user} — {self.amount} ({self.get_payment_method_display()})"

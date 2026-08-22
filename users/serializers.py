@@ -44,3 +44,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             city=validated_data.get("city", ""),
         )
         return user
+
+class PaymentCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payment
+        fields = ('paid_course',)  # принимаем только ID курса

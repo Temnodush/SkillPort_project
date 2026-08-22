@@ -6,6 +6,7 @@ class Course(models.Model):
     title = models.CharField(max_length=255, verbose_name="название")
     preview = models.ImageField(upload_to="courses/previews/", blank=True, null=True, verbose_name="превью")
     description = models.TextField(blank=True, null=True, verbose_name="описание")
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=1000, verbose_name="цена")
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
