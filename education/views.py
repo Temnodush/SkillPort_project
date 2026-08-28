@@ -4,6 +4,8 @@ from education.models import Course, Lesson
 from education.serializers import CourseSerializer, LessonSerializer
 from users.permissions import IsModerator, IsOwner
 from education.paginators import LessonPaginator, CoursePaginator
+from users.tasks import send_course_update_notification
+from django.utils import timezone
 
 
 class CourseViewSet(viewsets.ModelViewSet):
@@ -38,6 +40,12 @@ class CourseViewSet(viewsets.ModelViewSet):
         """Автоматически устанавливаем владельца при создании"""
         serializer.save(owner=self.request.user)
 
+    def perform_update(self, serializer):
+        old_updated_at = self.get_object().updated_at
+        course = serializer.save()
+        now = timezone.now()
+        if old_updated_at is None or (now - old_updated_at).total_seconds() > 4 * 3600:
+            send_course_update_notification.delay(course.id)
 
 class LessonListCreateAPIView(generics.ListCreateAPIView):
     serializer_class = LessonSerializer

@@ -7,6 +7,7 @@ class Course(models.Model):
     preview = models.ImageField(upload_to="courses/previews/", blank=True, null=True, verbose_name="превью")
     description = models.TextField(blank=True, null=True, verbose_name="описание")
     price = models.DecimalField(max_digits=10, decimal_places=2, default=1000, verbose_name="цена")
+    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True)
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -18,6 +19,9 @@ class Course(models.Model):
 
     def __str__(self):
         return self.title
+
+
+
 
     class Meta:
         verbose_name = "курс"
