@@ -1,0 +1,35 @@
+[
+  {
+    "model": "education.lesson",
+    "pk": 1,
+    "fields": {
+      "course": 1,
+      "title": "Введение в Python",
+      "description": "История языка, установка интерпретатора, первая программа.",
+      "preview": null,
+      "video_url": "https://example.com/videos/python-intro"
+    }
+  },
+  {
+    "model": "education.lesson",
+    "pk": 2,
+    "fields": {
+      "course": 1,
+      "title": "Переменные и типы данных",
+      "description": "int, float, str, bool, коллекции.",
+      "preview": null,
+      "video_url": "https://example.com/videos/python-types"
+    }
+  },
+  {
+    "model": "education.lesson",
+    "pk": 3,
+    "fields": {
+      "course": 2,
+      "title": "Первое API на DRF",
+      "description": "ModelViewSet, роутеры, сериализаторы.",
+      "preview": null,
+      "video_url": "https://example.com/videos/drf-first-api"
+    }
+  }
+]

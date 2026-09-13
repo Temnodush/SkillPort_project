@@ -1,0 +1,182 @@
+# =============================================================================
+#  SkillPort — запуск всего проекта одной командой:
+#
+#      docker compose up --build
+#
+#  Сервисы:
+#    web          — Django + DRF (единственный сервис с внешним доступом, ports)
+#    db           — PostgreSQL (только внутри docker-сети, expose + volume)
+#    redis        — брокер и хранилище результатов Celery (expose + volume)
+#    migrations   — одноразовое применение миграций перед стартом приложения
+#    celery       — воркер Celery (отправка писем, блокировка пользователей)
+#    celery-beat  — планировщик периодических задач (django_celery_beat)
+#
+#  Все переменные окружения берутся из файла .env (см. .env_example).
+# =============================================================================
+
+version: "3.8"
+
+services:
+
+  # ---------------------------------------------------------------------------
+  #  База данных. Внешнее подключение не планируется, поэтому порт 5432
+  #  не публикуется наружу — он только объявлен через expose.
+  #  Данные сохраняются в именованном томе postgres_data.
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    env_file:
+      - .env                  # POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - skillport
+
+  # ---------------------------------------------------------------------------
+  #  Redis: брокер сообщений и result backend для Celery.
+  #  Наружу не публикуется (expose), данные пишутся в том redis_data
+  #  в режиме appendonly, чтобы очередь не терялась при перезапуске.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - skillport
+
+  # ---------------------------------------------------------------------------
+  #  Одноразовый сервис: применяет миграции и завершается с кодом 0.
+  #  Остальные сервисы ждут его успешного завершения, поэтому база всегда
+  #  готова к работе (в том числе таблицы django_celery_beat для beat).
+  # ---------------------------------------------------------------------------
+  migrations:
+    build: .
+    image: skillport-web
+    command: python manage.py migrate --noinput
+    env_file:
+      - .env
+    environment:
+      # Внутри docker-сети сервисы доступны по именам сервисов, а не localhost
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - skillport
+
+  # ---------------------------------------------------------------------------
+  #  Django-приложение. Единственный сервис, доступный снаружи: порт 8000
+  #  пробрасывается на хост (ports), документация — http://localhost:8000/api/schema/swagger-ui/
+  # ---------------------------------------------------------------------------
+  web:
+    build: .
+    image: skillport-web
+    command: python manage.py runserver 0.0.0.0:8000
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app                # код проекта с хоста — удобно для разработки
+      - media_data:/app/media # загруженные файлы сохраняются между перезапусками
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - skillport
+
+  # ---------------------------------------------------------------------------
+  #  Воркер Celery — выполняет задачи из users/tasks.py.
+  #  Внешнее подключение не нужно: порты не публикуются и не объявляются.
+  # ---------------------------------------------------------------------------
+  celery:
+    build: .
+    image: skillport-web
+    command: celery -A config worker -l info
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+    volumes:
+      - .:/app
+      - media_data:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - skillport
+
+  # ---------------------------------------------------------------------------
+  #  Celery beat — планировщик периодических задач.
+  #  Расписание (например, блокировка неактивных пользователей раз в сутки)
+  #  хранится в базе, планировщик — django_celery_beat.schedulers:DatabaseScheduler.
+  # ---------------------------------------------------------------------------
+  celery-beat:
+    build: .
+    image: skillport-web
+    command: celery -A config beat -l info
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - skillport
+
+# -----------------------------------------------------------------------------
+#  Именованные тома: данные БД, очередь Redis и медиафайлы не теряются
+#  при пересоздании контейнеров.
+# -----------------------------------------------------------------------------
+volumes:
+  postgres_data:
+  redis_data:
+  media_data:
+
+networks:
+  skillport:
+    driver: bridge
