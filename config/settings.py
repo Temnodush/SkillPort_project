@@ -9,7 +9,9 @@ from dotenv import load_dotenv
 # ========================================================================
 #                              Базовые настройки
 # ========================================================================
-load_dotenv(override=True)
+# override=False: реальные переменные окружения (например, переданные сервисам
+# через docker compose) имеют приоритет над значениями из .env-файла
+load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEBUG = True if os.getenv("DEBUG") == "True" else False
 ALLOWED_HOSTS = []
@@ -112,11 +114,11 @@ SIMPLE_JWT = {
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv("NAME"),
-        'USER': os.getenv("USER"),
-        'PASSWORD': os.getenv("PASSWORD"),
-        'HOST': os.getenv("HOST"),
-        'PORT': os.getenv("PORT"),
+        'NAME': os.getenv("POSTGRES_DB"),
+        'USER': os.getenv("POSTGRES_USER"),
+        'PASSWORD': os.getenv("POSTGRES_PASSWORD"),
+        'HOST': os.getenv("POSTGRES_HOST", "localhost"),
+        'PORT': os.getenv("POSTGRES_PORT", "5432"),
     }
 }
 
