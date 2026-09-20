@@ -30,6 +30,14 @@ coverage.xml
 htmlcov/
 .pytest_cache/
 
+# --- Python-окружение на сервере ---
+venv/
+/.venv/
+
+# --- Логи и pid-файлы сервисов ---
+*.log
+*.pid
+
 # --- IDE и ОС ---
 .idea/
 .vscode/

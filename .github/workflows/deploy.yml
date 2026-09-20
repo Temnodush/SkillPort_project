@@ -1,0 +1,232 @@
+# =============================================================================
+#  CI/CD пайплайн проекта SkillPort.
+#
+#  Этапы (каждый следующий запускается только при успехе предыдущего):
+#    1. lint    — flake8, статический анализ кода
+#    2. test    — тесты Django на PostgreSQL (как на боевом сервере)
+#    3. build   — проверка готовности к деплою (manage.py check --deploy)
+#    4. deploy  — выкладка на сервер по SSH: rsync → миграции → collectstatic
+#                 → перезапуск systemd-сервиса skillport
+#
+#  Деплой автоматически блокируется, если линтер или тесты упали (директива needs).
+#
+#  Секреты репозитория (Settings → Secrets and variables → Actions):
+#    SERVER_IP  — публичный IP сервера
+#    SSH_USER   — пользователь для SSH-подключения
+#    SSH_KEY    — приватный SSH-ключ для входа на сервер
+#    DEPLOY_DIR — каталог проекта на сервере (например /var/www/SkillPort_project)
+#    SECRET_KEY — секретный ключ Django для проверок пайплайна
+# =============================================================================
+
+name: SkillPort CI/CD
+
+on:
+  push:
+  pull_request:
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  #  1. Линтер
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (flake8)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install flake8
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8==7.1.2
+
+      - name: Run flake8
+        run: flake8 .
+
+  # ---------------------------------------------------------------------------
+  #  2. Тесты
+  # ---------------------------------------------------------------------------
+  test:
+    name: Tests (Django + PostgreSQL)
+    runs-on: ubuntu-latest
+    needs: lint
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: skillport
+          POSTGRES_USER: skillport
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U skillport"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      SECRET_KEY: ci-only-secret-key-for-tests
+      DEBUG: 'True'
+      POSTGRES_DB: skillport
+      POSTGRES_USER: skillport
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: '5432'
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: '6379'
+      STRIPE_SECRET_KEY: sk_test_ci_placeholder
+      STRIPE_PUBLISHABLE_KEY: pk_test_ci_placeholder
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: python manage.py test --verbosity 2
+
+      - name: Check that SECRET_KEY is available from GitHub Secrets
+        env:
+          DJANGO_SECRET_KEY: ${{ secrets.SECRET_KEY }}
+        run: |
+          if [ -z "$DJANGO_SECRET_KEY" ]; then
+            echo "Секрет SECRET_KEY не задан в настройках репозитория"
+            exit 1
+          fi
+          echo "Секрет SECRET_KEY получен, длина: ${#DJANGO_SECRET_KEY} символов"
+
+  # ---------------------------------------------------------------------------
+  #  3. Проверка готовности к деплою
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build (deploy check)
+    runs-on: ubuntu-latest
+    needs: test
+
+    env:
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      DEBUG: 'False'
+      ALLOWED_HOSTS: ${{ secrets.SERVER_IP }}
+      CSRF_TRUSTED_ORIGINS: http://${{ secrets.SERVER_IP }}
+      POSTGRES_DB: skillport
+      POSTGRES_USER: skillport
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: '5432'
+      STRIPE_SECRET_KEY: sk_test_ci_placeholder
+      STRIPE_PUBLISHABLE_KEY: pk_test_ci_placeholder
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check production settings
+        run: python manage.py check --deploy
+
+  # ---------------------------------------------------------------------------
+  #  4. Деплой на сервер
+  #      Pull request-ы только проверяются, деплой идёт лишь при push.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to server
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install rsync
+        run: sudo apt-get update && sudo apt-get install -y rsync
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Copy project files to server
+        run: |
+          rsync -avz --delete \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='venv' \
+            --exclude='.venv' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='staticfiles' \
+            --exclude='media' \
+            --exclude='.idea' \
+            --exclude='.vscode' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            ./ ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }}:${{ secrets.DEPLOY_DIR }}/
+
+      - name: Install dependencies on server
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          set -e
+          cd ${{ secrets.DEPLOY_DIR }}
+          /var/www/skillport-venv/bin/pip install --no-cache-dir -r requirements.txt
+          EOF
+
+      - name: Apply migrations on server
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          set -e
+          cd ${{ secrets.DEPLOY_DIR }}
+          /var/www/skillport-venv/bin/python manage.py migrate --noinput
+          EOF
+
+      - name: Collect static files on server
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          set -e
+          cd ${{ secrets.DEPLOY_DIR }}
+          /var/www/skillport-venv/bin/python manage.py collectstatic --noinput
+          EOF
+
+      - name: Restart application
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          set -e
+          sudo systemctl restart skillport.service
+          sleep 3
+          systemctl is-active skillport.service
+          curl -s -o /dev/null -w "HTTP-код приложения: %{http_code}\n" http://127.0.0.1:8000/api/schema/swagger-ui/
+          EOF

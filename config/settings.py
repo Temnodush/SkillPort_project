@@ -13,8 +13,22 @@ from dotenv import load_dotenv
 # через docker compose) имеют приоритет над значениями из .env-файла
 load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEBUG = True if os.getenv("DEBUG") == "True" else False
-ALLOWED_HOSTS = []
+
+
+def env_list(name, default=""):
+    """Читает переменную окружения со списком значений через запятую."""
+    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
+
+DEBUG = os.getenv("DEBUG", "False").strip().lower() in ("true", "1", "yes")
+
+# Хосты, с которых разрешено обращаться к приложению (IP сервера или домен).
+# Задаётся в .env: ALLOWED_HOSTS=81.26.176.220,localhost,127.0.0.1
+ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+
+# Доверенные источники для CSRF (нужны для входа в админку и Swagger по IP).
+# Задаётся в .env: CSRF_TRUSTED_ORIGINS=http://81.26.176.220
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
 
 # Получение ключей из ENV
 SECRET_KEY = os.getenv("SECRET_KEY") # Django
@@ -164,9 +178,19 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+# Куда collectstatic складывает файлы: эту папку раздаёт Nginx (location /static/)
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Боевые настройки безопасности: включаются только при DEBUG=False,
+# чтобы не мешать локальной разработке.
+if not DEBUG:
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SESSION_COOKIE_SECURE = False  # True после подключения HTTPS
+    CSRF_COOKIE_SECURE = False     # True после подключения HTTPS
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration

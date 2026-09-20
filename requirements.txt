@@ -24,7 +24,9 @@ dnspython==2.8.0
 drf-spectacular==0.30.0
 eventlet==0.41.2
 executing==2.2.1
+flake8==7.1.2
 greenlet==3.5.5
+gunicorn==23.0.0
 idna==3.19
 inflection==0.5.1
 ipython==9.16.1

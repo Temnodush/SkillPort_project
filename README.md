@@ -173,17 +173,160 @@ docker compose down                 # остановить проект
    celery -A config beat -l info
    ```
 
+## Деплой на сервер (venv + Gunicorn + Nginx + systemd)
+
+Продовый запуск отличается от локального: приложение работает под **Gunicorn**, перед ним стоит
+**Nginx**, а автозапуск и авто-перезапуск обеспечивает **systemd**. Docker on сервере не используется —
+там применяется схема из урока по ручному деплою.
+
+```
+браузер → Nginx (:80) → Gunicorn (127.0.0.1:8000) → Django
+                       └─ /static/ и /media/ Nginx отдаёт сам с диска
+```
+
+### Что установлено на сервере (Ubuntu 24.04)
+
+| Компонент | Назначение |
+|---|---|
+| Python 3.12 + `python3-venv` | окружение приложения (версия совпадает с Django 6) |
+| PostgreSQL 16 | база данных, слушает только `127.0.0.1:5432` |
+| Redis 7 | брокер Celery, слушает только `127.0.0.1:6379` |
+| Gunicorn | WSGI-сервер приложения, слушает только `127.0.0.1:8000` |
+| Nginx 1.24 | приём запросов на порт 80, отдача статики, прокси на Gunicorn |
+| systemd | юнит `skillport.service`: автозапуск и авто-перезапуск |
+
+### Файлы деплоя в репозитории
+
+| Файл | Назначение |
+|---|---|
+| `.setup/skillport.service` | systemd-юнит для Gunicorn (`Restart=always`) |
+| `.setup/nginx.conf` | конфиг Nginx: `proxy_pass` на Gunicorn + раздача статики |
+| `.github/workflows/deploy.yml` | CI/CD: линт → тесты → проверка → деплой |
+
+### Разовая настройка сервера
+
+```bash
+# 1. Пакеты
+sudo apt update && sudo apt install -y \
+  python3-venv python3-dev build-essential libpq-dev \
+  postgresql postgresql-contrib redis-server nginx git
+
+sudo systemctl enable --now postgresql redis-server nginx
+
+# 2. Файрвол: наружу открыты только SSH, HTTP и HTTPS
+sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
+
+# 3. Пользователь и база данных
+sudo -u postgres psql -c "CREATE ROLE skillport LOGIN PASSWORD 'ПАРОЛЬ';"
+sudo -u postgres createdb -O skillport skillport
+sudo -u postgres psql -c "ALTER ROLE skillport CREATEDB;"   # нужно для запуска тестов
+
+# 4. Код и виртуальное окружение (venv намеренно лежит вне каталога проекта)
+sudo mkdir -p /var/www && sudo chown -R "$USER":"$USER" /var/www
+git clone git@github.com:Temnodush/SkillPort_project.git /var/www/SkillPort_project
+python3 -m venv /var/www/skillport-venv
+/var/www/skillport-venv/bin/pip install -r /var/www/SkillPort_project/requirements.txt
+
+# 5. Файл .env (в репозиторий не попадает) — создаётся из .env_example
+nano /var/www/SkillPort_project/.env
+chmod 600 /var/www/SkillPort_project/.env
+
+# 6. Миграции, статика, сервисы
+cd /var/www/SkillPort_project
+/var/www/skillport-venv/bin/python manage.py migrate --noinput
+/var/www/skillport-venv/bin/python manage.py collectstatic --noinput
+
+sudo cp .setup/skillport.service /etc/systemd/system/skillport.service
+sudo cp .setup/nginx.conf /etc/nginx/sites-available/skillport
+sudo ln -sf /etc/nginx/sites-available/skillport /etc/nginx/sites-enabled/skillport
+sudo rm -f /etc/nginx/sites-enabled/default
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now skillport
+sudo nginx -t && sudo systemctl restart nginx
+```
+
+### Разрешение на перезапуск сервиса без пароля
+
+Workflow деплоя выполняет `sudo systemctl restart skillport.service` по SSH. Чтобы команда
+не запрашивала пароль, добавьте правило sudoers:
+
+```bash
+echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart skillport.service, /usr/bin/systemctl status skillport.service" | sudo tee /etc/sudoers.d/skillport
+sudo chmod 440 /etc/sudoers.d/skillport
+sudo visudo -c
+```
+
+### Управление приложением
+
+```bash
+sudo systemctl status skillport        # состояние
+sudo systemctl restart skillport       # перезапуск
+journalctl -u skillport -f             # логи приложения
+sudo tail -f /var/log/nginx/error.log  # логи Nginx
+sudo nginx -t                          # проверка конфига Nginx
+```
+
+После перезагрузки сервера приложение поднимается автоматически: `systemctl enable` для
+`postgresql`, `redis-server`, `nginx` и `skillport` включён.
+
+## CI/CD: GitHub Actions
+
+Workflow `.github/workflows/deploy.yml` запускается при каждом `push` и `pull_request`
+и состоит из четырёх последовательных этапов. Каждый следующий запускается только при
+успехе предыдущего (`needs`) — падение тестов или линтера **останавливает** весь пайплайн,
+и на сервер ничего не выкладывается.
+
+| Этап | Job | Что делает |
+|---|---|---|
+| 1 | `lint` | `flake8` по коду проекта |
+| 2 | `test` | `python manage.py test` на PostgreSQL 16 (сервисный контейнер) |
+| 3 | `build` | `manage.py check --deploy` с боевыми настройками (`DEBUG=False`) |
+| 4 | `deploy` | по SSH: `rsync` → `pip install` → `migrate` → `collectstatic` → `systemctl restart` |
+
+### Секреты репозитория
+
+Настраиваются в GitHub: **Settings → Secrets and variables → Actions → New repository secret**.
+
+| Секрет | Значение | Пример |
+|---|---|---|
+| `SERVER_IP` | публичный IP сервера | `81.26.176.220` |
+| `SSH_USER` | пользователь для SSH | `novotropsk` |
+| `SSH_KEY` | приватный SSH-ключ | содержимое `~/.ssh/id_ed25519` |
+| `DEPLOY_DIR` | каталог проекта на сервере | `/var/www/SkillPort_project` |
+| `SECRET_KEY` | секретный ключ Django | результат `get_random_secret_key()` |
+
+`SECRET_KEY` используется в job-ах `test` и `build`. Отдельный шаг проверяет, что секрет
+действительно получен из GitHub Secrets, и печатает только его длину — сам ключ в логах
+не появляется.
+
+Секреты самого приложения (пароль БД, ключи Stripe, пароль почты) хранятся в файле `.env`
+**на сервере** и в репозиторий не попадают: он перечислен в `.gitignore` (не уедет в git)
+и в `.dockerignore` (не попадёт в образ). Деплой исключает `.env` из `rsync`, поэтому
+обновление кода не затирает настройки сервера.
+
+### Проверка после деплоя
+
+1. Открыть `http://<SERVER_IP>/api/schema/swagger-ui/` — документация API.
+2. `http://<SERVER_IP>/admin/` — админка Django.
+3. Снаружи порт `8000` недоступен: `curl -m 5 http://<SERVER_IP>:8000` завершается ошибкой,
+   потому что Gunicorn слушает только `127.0.0.1`. Порты `5432` и `6379` закрыты так же.
+4. Авто-перезапуск: `sudo reboot`, после загрузки приложение отвечает без ручного запуска.
+
 ## Структура проекта
 
 ```
 .
+├── .github/workflows/   # CI/CD: линт → тесты → build → деплой по SSH
+├── .setup/              # файлы деплоя: skillport.service, nginx.conf
 ├── config/              # настройки проекта: settings.py, urls.py, celery.py
 ├── education/           # приложение курсов и уроков (+ фикстуры)
 ├── users/               # приложение пользователей, подписок и оплат (+ фикстуры)
-├── Dockerfile           # образ для web / celery / celery-beat / migrations
-├── docker-compose.yml   # описание всех сервисов проекта
+├── Dockerfile           # образ для локального запуска через docker compose
+├── docker-compose.yml   # локальная разработка: web, db, redis, celery, beat
+├── .flake8              # настройки линтера
 ├── .dockerignore        # что не попадает в образ (в т.ч. .env)
-├── .env_example         # шаблон переменных окружения
+├── .env_example         # шаблон переменных окружения (скопировать в .env)
 ├── requirements.txt     # зависимости проекта
 └── manage.py
 ```
