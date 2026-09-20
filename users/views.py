@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from education.models import Course
 from users.models import Payment, User, Subscription
-from users.permissions import IsOwner, IsModerator, IsSelfUser
+from users.permissions import IsModerator, IsSelfUser
 from users.serializers import PaymentSerializer, UserSerializer, UserRegistrationSerializer, PaymentCreateSerializer
 from django.shortcuts import get_object_or_404
 from users.services import create_stripe_product, create_stripe_price, create_stripe_session
