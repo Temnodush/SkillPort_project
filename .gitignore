@@ -1,0 +1,50 @@
+# --- Переменные окружения (секреты в репозиторий не попадают) ---
+.env
+
+# --- Виртуальные окружения ---
+/.venv/
+/venv/
+env/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# --- Django ---
+*.sqlite3
+/media/
+/staticfiles/
+
+# --- Celery ---
+celerybeat-schedule
+celerybeat.pid
+
+# --- Тесты и покрытие ---
+.coverage
+.coverage.*
+coverage.txt
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+# --- Python-окружение на сервере ---
+venv/
+/.venv/
+
+# --- Логи и pid-файлы сервисов ---
+*.log
+*.pid
+
+# --- IDE и ОС ---
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
+
+# --- Служебные файлы для сдачи задания ---
+/collect_code.py
+project_code.txt

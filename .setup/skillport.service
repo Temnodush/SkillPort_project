@@ -1,0 +1,35 @@
+[Unit]
+Description=SkillPort — Django-приложение под Gunicorn
+Documentation=https://github.com/Temnodush/SkillPort_project
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=novotropsk
+Group=novotropsk
+
+WorkingDirectory=/var/www/SkillPort_project
+
+# Переменные окружения (.env) подхватывает сам Django через python-dotenv
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+ExecStart=/var/www/skillport-venv/bin/gunicorn \
+    --bind 127.0.0.1:8000 \
+    --workers 2 \
+    --timeout 60 \
+    --access-logfile - \
+    --error-logfile - \
+    config.wsgi:application
+
+# Авто-перезапуск: сервис поднимается сам после падения и после перезагрузки сервера
+Restart=always
+RestartSec=5
+
+# Логи уходят в journald: смотреть командой journalctl -u skillport -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

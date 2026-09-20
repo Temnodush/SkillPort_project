@@ -1,0 +1,36 @@
+# Секреты никогда не попадают в образ — переменные передаются через docker compose
+.env
+
+# Git и IDE
+.git
+.gitignore
+.idea
+.vscode
+
+# Виртуальные окружения
+.venv
+venv
+
+# Python-мусор
+__pycache__
+*.py[cod]
+*.egg-info
+
+# Django / Celery артефакты
+*.sqlite3
+celerybeat-schedule
+celerybeat.pid
+media
+staticfiles
+
+# Тестовое покрытие и служебные файлы
+.coverage
+coverage.txt
+htmlcov
+collect_code.py
+project_code.txt
+
+# Документация и файлы docker (внутри образа не нужны)
+*.md
+docker-compose*.yml
+Dockerfile

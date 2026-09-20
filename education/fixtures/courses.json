@@ -1,0 +1,20 @@
+[
+  {
+    "model": "education.course",
+    "pk": 1,
+    "fields": {
+      "title": "Python Basic",
+      "preview": null,
+      "description": "Базовый курс по Python: синтаксис, типы данных, функции."
+    }
+  },
+  {
+    "model": "education.course",
+    "pk": 2,
+    "fields": {
+      "title": "Django REST Framework",
+      "preview": null,
+      "description": "Разработка REST API на Django: сериализаторы, вьюхи, роутеры."
+    }
+  }
+]
