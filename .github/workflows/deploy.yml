@@ -23,6 +23,8 @@ name: SkillPort CI/CD
 on:
   push:
   pull_request:
+  # Ручной запуск кнопкой Run workflow на вкладке Actions
+  workflow_dispatch:
 
 jobs:
 
@@ -74,7 +76,9 @@ jobs:
           --health-retries 5
 
     env:
-      SECRET_KEY: ci-only-secret-key-for-tests
+      # Ключ только для прогона тестов: длиннее 32 байт, чтобы не было
+      # предупреждения InsecureKeyLengthWarning от PyJWT
+      SECRET_KEY: ci-only-secret-key-for-tests-0123456789abcdefghijklmnop
       DEBUG: 'True'
       POSTGRES_DB: skillport
       POSTGRES_USER: skillport
